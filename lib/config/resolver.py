@@ -284,15 +284,24 @@ class ConfigResolver:
     async def resolve_narration_speed(self, project: dict | None) -> float | None:
         """解析旁白语速：project.json 顶层 ``narration_speed`` > 全局 setting > None（不传给 backend）。
 
+        覆盖值宽容解析：数字与数字字符串均接受（口径与 ``default_duration`` 一致）；
         损坏的覆盖值（非数值/非正/非有限）按未设置处理，回退下一级。
         """
         async with self._open_session() as (session, svc):
             if project is not None:
                 override = project.get("narration_speed")
                 if isinstance(override, (int, float)) and not isinstance(override, bool):
-                    speed = float(override)
-                    if math.isfinite(speed) and speed > 0:
+                    try:
+                        speed = float(override)
+                    except OverflowError:
+                        # 超出 float 范围的巨大整数等同非有限值，按未设置回退下一级
+                        speed = None
+                    if speed is not None and math.isfinite(speed) and speed > 0:
                         return speed
+                elif isinstance(override, str):
+                    speed_from_str = ConfigService.parse_narration_speed(override)
+                    if speed_from_str is not None:
+                        return speed_from_str
             return await svc.get_narration_speed()
 
     async def video_capabilities(self, project_name: str | None = None) -> dict:
