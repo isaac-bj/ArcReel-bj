@@ -213,7 +213,7 @@ class ArkVideoBackend(ProviderJobIdPersistenceMixin):
     async def _poll_until_done(self, task_id: str, request: VideoGenerationRequest) -> VideoGenerationResult:
         """轮询任务状态直到完成，瞬态错误仅重试当次轮询请求。"""
         poll_interval = 10 if request.service_tier == "default" else 60
-        max_wait_time = 600 if request.service_tier == "default" else 3600
+        max_wait_time = 1200 if request.service_tier == "default" else 3600
 
         result = await poll_with_retry(
             poll_fn=lambda: asyncio.to_thread(self._client.content_generation.tasks.get, task_id=task_id),

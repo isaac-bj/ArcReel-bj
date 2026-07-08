@@ -50,7 +50,7 @@ PROVIDER_V2_VIDEO = "v2-video-generations"
 
 _SUBMIT_PATH = "/v2/video/generations"
 _POLL_INTERVAL_SECONDS = 5.0
-_MIN_POLL_TIMEOUT_SECONDS = 600
+_MIN_POLL_TIMEOUT_SECONDS = 1200
 _POLL_TIMEOUT_PER_SECOND = 30
 
 # generic 端点跨多模型，参考图上限无单一供应商真相；取保守默认，由 resolver 在 endpoint

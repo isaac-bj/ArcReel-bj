@@ -5,6 +5,7 @@ from lib.providers import (
     PROVIDER_ARK_AGENT_PLAN,
     PROVIDER_GEMINI,
     PROVIDER_GROK,
+    PROVIDER_MANXUE,
     PROVIDER_NEWAPI,
     PROVIDER_OPENAI,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "PROVIDER_GEMINI",
     "PROVIDER_GROK",
     "PROVIDER_NEWAPI",
+    "PROVIDER_MANXUE",
     "PROVIDER_OPENAI",
     "VideoBackend",
     "VideoCapability",
@@ -57,6 +59,11 @@ register_backend(PROVIDER_OPENAI, OpenAIVideoBackend)
 from lib.video_backends.newapi import NewAPIVideoBackend
 
 register_backend(PROVIDER_NEWAPI, NewAPIVideoBackend)
+
+# Manxue OpenAI-compatible video endpoint for 1ren-dance-2-ka
+from lib.video_backends.manxue import ManxueVideoBackend
+
+register_backend(PROVIDER_MANXUE, ManxueVideoBackend)
 
 # fork: Vidu — 单独 import 以避免与上游聚合 import 冲突
 from lib.providers import PROVIDER_VIDU  # noqa: E402

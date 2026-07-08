@@ -72,7 +72,7 @@ DEFAULT_MODEL = "happyhorse-1.0-i2v"
 
 _VIDEO_ENDPOINT = "/services/aigc/video-generation/video-synthesis"
 
-_MIN_POLL_TIMEOUT_SECONDS = 900.0
+_MIN_POLL_TIMEOUT_SECONDS = 1200.0
 _POLL_TIMEOUT_PER_SECOND = 60.0
 
 _TV = VideoCapability.TEXT_TO_VIDEO

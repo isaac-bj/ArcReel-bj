@@ -478,6 +478,20 @@ export function CustomProviderForm({ existing, onSaved, onCancel }: CustomProvid
     setModels((prev) => [...prev, newModelRow()]);
   };
 
+  const addManxueSeedanceModel = () => {
+    setModels((prev) => [
+      ...prev,
+      newModelRow({
+        model_id: "guanfang-seedance-2-fast",
+        display_name: "Manxue Official Seedance 2 Fast",
+        endpoint: "manxue-seedance-video",
+        is_default: prev.every((m) => !m.is_default),
+        resolution: "720p",
+        supported_durations_text: "10",
+      }),
+    ]);
+  };
+
   // --- Base URL preview (effective models endpoint) ---
   const urlPreview = urlPreviewFor(discoveryFormat, baseUrl);
 
@@ -786,15 +800,25 @@ export function CustomProviderForm({ existing, onSaved, onCancel }: CustomProvid
               })}
             </div>
 
-            {/* Add manual model */}
-            <button
-              type="button"
-              onClick={addManualModel}
-              className="mt-2 flex items-center gap-1.5 font-mono text-[10.5px] font-bold uppercase tracking-[0.14em] text-text-3 transition-colors hover:text-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t("add_model_manually")}
-            </button>
+            {/* Add model shortcuts */}
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <button
+                type="button"
+                onClick={addManualModel}
+                className="flex items-center gap-1.5 font-mono text-[10.5px] font-bold uppercase tracking-[0.14em] text-text-3 transition-colors hover:text-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("add_model_manually")}
+              </button>
+              <button
+                type="button"
+                onClick={addManxueSeedanceModel}
+                className="flex items-center gap-1.5 font-mono text-[10.5px] font-bold uppercase tracking-[0.14em] text-accent-2 transition-colors hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("add_manxue_seedance_model")}
+              </button>
+            </div>
           </div>
         )}
 
@@ -808,6 +832,13 @@ export function CustomProviderForm({ existing, onSaved, onCancel }: CustomProvid
               className="ml-1 font-mono text-[10.5px] font-bold uppercase tracking-[0.14em] text-accent-2 transition-colors hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {t("add_model_manually")}
+            </button>
+            <button
+              type="button"
+              onClick={addManxueSeedanceModel}
+              className="ml-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.14em] text-accent-2 transition-colors hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              {t("add_manxue_seedance_model")}
             </button>
           </div>
         )}

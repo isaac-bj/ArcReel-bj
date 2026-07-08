@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "kling-v1"
 
 _POLL_INTERVAL_SECONDS = 5.0
-_MIN_POLL_TIMEOUT_SECONDS = 600
+_MIN_POLL_TIMEOUT_SECONDS = 1200
 _POLL_TIMEOUT_PER_SECOND = 30
 
 # 超过此阈值的起始图会触发 warning，NewAPI 聚合后端常见 4MB 请求体上限

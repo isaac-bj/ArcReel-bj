@@ -34,6 +34,7 @@ from lib.video_backends.ark import ArkVideoBackend
 from lib.video_backends.base import VideoCapabilities
 from lib.video_backends.dashscope import DashScopeVideoBackend
 from lib.video_backends.kling import KlingVideoBackend
+from lib.video_backends.manxue import ManxueSeedanceVideoBackend, ManxueVideoBackend
 from lib.video_backends.minimax import MiniMaxVideoBackend
 from lib.video_backends.newapi import NewAPIVideoBackend
 from lib.video_backends.openai import OpenAIVideoBackend
@@ -146,6 +147,16 @@ def _build_newapi_video(provider, model_id: str) -> CustomVideoBackend:
     if not base_url:
         raise ValueError("NewAPI 视频后端需要 base_url")
     delegate = NewAPIVideoBackend(api_key=provider.api_key, base_url=base_url, model=model_id)
+    return CustomVideoBackend(provider_id=provider.provider_id, delegate=delegate, model=model_id)
+
+
+def _build_manxue_video(provider, model_id: str) -> CustomVideoBackend:
+    delegate = ManxueVideoBackend(api_key=provider.api_key, base_url=provider.base_url, model=model_id)
+    return CustomVideoBackend(provider_id=provider.provider_id, delegate=delegate, model=model_id)
+
+
+def _build_manxue_seedance_video(provider, model_id: str) -> CustomVideoBackend:
+    delegate = ManxueSeedanceVideoBackend(api_key=provider.api_key, base_url=provider.base_url, model=model_id)
     return CustomVideoBackend(provider_id=provider.provider_id, delegate=delegate, model=model_id)
 
 
@@ -306,6 +317,26 @@ ENDPOINT_REGISTRY: dict[str, EndpointSpec] = {
         request_path_template="/v1/video/generations",
         build_backend=_build_newapi_video,
         video_max_reference_images=0,
+    ),
+    "manxue-video": EndpointSpec(
+        key="manxue-video",
+        media_type="video",
+        family="openai",
+        display_name_key="endpoint_manxue_video_display",
+        request_method="POST",
+        request_path_template="/v1/videos",
+        build_backend=_build_manxue_video,
+        video_caps_for_model=ManxueVideoBackend.video_capabilities_for_model,
+    ),
+    "manxue-seedance-video": EndpointSpec(
+        key="manxue-seedance-video",
+        media_type="video",
+        family="openai",
+        display_name_key="endpoint_manxue_seedance_video_display",
+        request_method="POST",
+        request_path_template="/v1/videos",
+        build_backend=_build_manxue_seedance_video,
+        video_caps_for_model=ManxueSeedanceVideoBackend.video_capabilities_for_model,
     ),
     "v2-video-generations": EndpointSpec(
         key="v2-video-generations",
@@ -505,7 +536,7 @@ def endpoint_spec_to_dict(spec: EndpointSpec) -> dict:
 _IMAGE_PATTERN = re.compile(r"image|dall|img|imagen|flux|seedream|jimeng|viduq[12](?:[-_].*)?", re.IGNORECASE)
 _VIDEO_PATTERN = re.compile(
     r"video|sora|kling|wan|seedance|cog|mochi|veo|pika|runway|"
-    r"vidu2(?:\.0)?(?:[-_].*)?|viduq3(?:[-_].*)?",
+    r"vidu2(?:\.0)?(?:[-_].*)?|viduq3(?:[-_].*)?|1ren-dance",
     re.IGNORECASE,
 )
 # TTS 模型 id 识别（tts-1 / gpt-4o-mini-tts / speech-1.5 / cosyvoice 等）。
@@ -566,6 +597,10 @@ def infer_endpoint(model_id: str, discovery_format: str) -> str:
         if "video" in lowered:
             return "kling-video"
         return "kling-image" if is_image else "kling-video"
+    if "guanfang-seedance" in lowered:
+        return "manxue-seedance-video"
+    if "1ren-dance" in lowered:
+        return "manxue-video"
 
     # wan2.x-image 含 "wan" 会被 _VIDEO_PATTERN 误判为视频；显式排除让它落到图像家族推断
     is_video = bool(_VIDEO_PATTERN.search(model_id)) and not ("wan2." in lowered and is_image)

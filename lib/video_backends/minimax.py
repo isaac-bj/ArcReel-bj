@@ -68,7 +68,7 @@ _SUBMIT_ENDPOINT = "/video_generation"
 _QUERY_ENDPOINT = "/query/video_generation"
 _RETRIEVE_ENDPOINT = "/files/retrieve"
 
-_MIN_POLL_TIMEOUT_SECONDS = 900.0
+_MIN_POLL_TIMEOUT_SECONDS = 1200.0
 _POLL_TIMEOUT_PER_SECOND = 60.0
 
 _TV = VideoCapability.TEXT_TO_VIDEO

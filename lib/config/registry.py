@@ -1249,6 +1249,49 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         # 用户可经 video_max_workers 覆盖。其余 lane 未声明，走全局默认。
         default_concurrency={"video": 1},
     ),
+    "manxue": ProviderMeta(
+        display_name="Manxue API",
+        description="Manxue API OpenAI-compatible video gateway for 1ren Dance and official Seedance video generation.",
+        required_keys=["api_key"],
+        optional_keys=["base_url", "video_max_workers"],
+        secret_keys=["api_key"],
+        models={
+            "1ren-dance-2-ka": ModelInfo(
+                display_name="1ren Dance 2 KA",
+                media_type="video",
+                capabilities=["text_to_video", "image_to_video"],
+                default=True,
+                supported_durations=list(range(4, 16)),
+                resolutions=["1280x720", "720x1280", "1024x1024"],
+                max_reference_images=9,
+            ),
+            "guanfang-seedance-2": ModelInfo(
+                display_name="Official Seedance 2",
+                media_type="video",
+                capabilities=["text_to_video", "image_to_video"],
+                supported_durations=[10, 15],
+                resolutions=["480p", "720p", "1080p"],
+                max_reference_images=9,
+            ),
+            "guanfang-seedance-2-fast": ModelInfo(
+                display_name="Official Seedance 2 Fast",
+                media_type="video",
+                capabilities=["text_to_video", "image_to_video"],
+                supported_durations=[10, 15],
+                resolutions=["480p", "720p", "1080p"],
+                max_reference_images=9,
+            ),
+            "guanfang-seedance-2-mini": ModelInfo(
+                display_name="Official Seedance 2 Mini",
+                media_type="video",
+                capabilities=["text_to_video", "image_to_video"],
+                supported_durations=[10, 15],
+                resolutions=["480p", "720p", "1080p"],
+                max_reference_images=9,
+            ),
+        },
+        default_base_url="https://manxueapi.com/v1",
+    ),
 }
 
 

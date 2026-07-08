@@ -64,16 +64,21 @@ describe("endpoint-catalog-store", () => {
 
     const s = useEndpointCatalogStore.getState();
     expect(s.initialized).toBe(true);
-    expect(s.endpoints).toEqual(FIXTURE);
+    expect(s.endpoints).toEqual([
+      ...FIXTURE,
+      expect.objectContaining({ key: "manxue-seedance-video" }),
+    ]);
     expect(s.endpointToMediaType).toEqual({
       "openai-chat": "text",
       "newapi-video": "video",
+      "manxue-seedance-video": "video",
       "openai-images": "image",
       "openai-images-generations": "image",
       "openai-images-edits": "image",
     });
     expect(s.endpointPaths["openai-chat"]).toEqual({ method: "POST", path: "/v1/chat/completions" });
     expect(s.endpointPaths["openai-images-edits"]).toEqual({ method: "POST", path: "/v1/images/edits" });
+    expect(s.endpointPaths["manxue-seedance-video"]).toEqual({ method: "POST", path: "/v1/videos" });
   });
 
   it("derives endpointToImageCapabilities from catalog", async () => {
@@ -88,6 +93,26 @@ describe("endpoint-catalog-store", () => {
     // 非 image 类不出现在 map 中
     expect(map["openai-chat"]).toBeUndefined();
     expect(map["newapi-video"]).toBeUndefined();
+    expect(map["manxue-seedance-video"]).toBeUndefined();
+  });
+
+  it("patches Manxue official Seedance into older endpoint catalogs", async () => {
+    vi.spyOn(API, "listEndpointCatalog").mockResolvedValue({ endpoints: FIXTURE });
+
+    await useEndpointCatalogStore.getState().fetch();
+
+    const patched = useEndpointCatalogStore
+      .getState()
+      .endpoints.find((e) => e.key === "manxue-seedance-video");
+    expect(patched).toEqual({
+      key: "manxue-seedance-video",
+      media_type: "video",
+      family: "openai",
+      display_name_key: "endpoint_manxue_seedance_video_display",
+      request_method: "POST",
+      request_path_template: "/v1/videos",
+      image_capabilities: null,
+    });
   });
 
   it("fetch short-circuits after initialized", async () => {
@@ -115,9 +140,14 @@ describe("endpoint-catalog-store", () => {
 
     await useEndpointCatalogStore.getState().fetch();
     expect(useEndpointCatalogStore.getState().initialized).toBe(false);
+    expect(useEndpointCatalogStore.getState().endpoints).toContainEqual(
+      expect.objectContaining({ key: "manxue-seedance-video" }),
+    );
 
     await useEndpointCatalogStore.getState().fetch();
     expect(useEndpointCatalogStore.getState().initialized).toBe(true);
-    expect(useEndpointCatalogStore.getState().endpoints).toEqual(FIXTURE);
+    expect(useEndpointCatalogStore.getState().endpoints).toContainEqual(
+      expect.objectContaining({ key: "manxue-seedance-video" }),
+    );
   });
 });

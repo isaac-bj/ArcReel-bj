@@ -25,6 +25,8 @@ class TestRegistry:
             "gemini-image",
             "openai-video",
             "newapi-video",
+            "manxue-video",
+            "manxue-seedance-video",
             "v2-video-generations",
             "ark-seedance",
             "vidu-video",
@@ -72,6 +74,8 @@ class TestRegistry:
             "dashscope-async-video",
             "minimax-video",
             "kling-video",
+            "manxue-video",
+            "manxue-seedance-video",
         ):
             assert ENDPOINT_REGISTRY[key].video_max_reference_images is None
         # 既有显式 int 保留，行为零变化
@@ -92,6 +96,8 @@ class TestRegistry:
             "dashscope-async-video",
             "minimax-video",
             "kling-video",
+            "manxue-video",
+            "manxue-seedance-video",
         ):
             assert ENDPOINT_REGISTRY[key].video_caps_for_model is not None
         # 显式 int 的 video endpoint 不应再绑 caps 函数
@@ -204,6 +210,8 @@ class TestRegistry:
         assert video_keys == {
             "openai-video",
             "newapi-video",
+            "manxue-video",
+            "manxue-seedance-video",
             "v2-video-generations",
             "ark-seedance",
             "vidu-video",
@@ -224,6 +232,8 @@ class TestHelpers:
 
     def test_endpoint_to_media_type(self):
         assert endpoint_to_media_type("newapi-video") == "video"
+        assert endpoint_to_media_type("manxue-video") == "video"
+        assert endpoint_to_media_type("manxue-seedance-video") == "video"
         assert endpoint_to_media_type("gemini-image") == "image"
 
     def test_endpoint_to_media_type_unknown_raises(self):

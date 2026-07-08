@@ -29,6 +29,24 @@ interface EndpointCatalogState {
   refresh: () => Promise<void>;
 }
 
+const LOCAL_ENDPOINT_PATCHES: EndpointDescriptor[] = [
+  {
+    key: "manxue-seedance-video",
+    media_type: "video",
+    family: "openai",
+    display_name_key: "endpoint_manxue_seedance_video_display",
+    request_method: "POST",
+    request_path_template: "/v1/videos",
+    image_capabilities: null,
+  },
+];
+
+function mergeLocalEndpointPatches(endpoints: EndpointDescriptor[]): EndpointDescriptor[] {
+  const seen = new Set(endpoints.map((e) => e.key));
+  const missing = LOCAL_ENDPOINT_PATCHES.filter((e) => !seen.has(e.key));
+  return missing.length ? [...endpoints, ...missing] : endpoints;
+}
+
 function deriveMaps(endpoints: EndpointDescriptor[]): {
   endpointToMediaType: Record<string, MediaType>;
   endpointPaths: Record<string, EndpointPath>;
@@ -65,9 +83,10 @@ export const useEndpointCatalogStore = create<EndpointCatalogState>((set, get) =
     set({ loading: true });
     try {
       const res = await API.listEndpointCatalog();
-      const { endpointToMediaType, endpointPaths, endpointToImageCapabilities } = deriveMaps(res.endpoints);
+      const endpoints = mergeLocalEndpointPatches(res.endpoints);
+      const { endpointToMediaType, endpointPaths, endpointToImageCapabilities } = deriveMaps(endpoints);
       set({
-        endpoints: res.endpoints,
+        endpoints,
         endpointToMediaType,
         endpointPaths,
         endpointToImageCapabilities,
@@ -76,7 +95,16 @@ export const useEndpointCatalogStore = create<EndpointCatalogState>((set, get) =
       });
     } catch {
       // 失败时保持 initialized=false，组件可降级显示 placeholder；下次 fetch 仍会重试。
-      set({ loading: false });
+      const endpoints = mergeLocalEndpointPatches([]);
+      const { endpointToMediaType, endpointPaths, endpointToImageCapabilities } = deriveMaps(endpoints);
+      set({
+        endpoints,
+        endpointToMediaType,
+        endpointPaths,
+        endpointToImageCapabilities,
+        loading: false,
+        initialized: false,
+      });
     }
   },
 }));

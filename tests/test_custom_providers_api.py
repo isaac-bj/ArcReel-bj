@@ -212,6 +212,8 @@ class TestEndpointCatalog:
             "gemini-image",
             "openai-video",
             "newapi-video",
+            "manxue-video",
+            "manxue-seedance-video",
             "v2-video-generations",
             "ark-seedance",
             "vidu-video",
