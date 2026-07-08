@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import json
 
 from openai import AsyncOpenAI, BadRequestError
+from pydantic import BaseModel, ValidationError
 
 from lib.config.url_utils import is_official_openai_base_url
 from lib.logging_utils import format_kwargs_for_log
@@ -16,10 +18,12 @@ from lib.text_backends.base import (
     TextGenerationRequest,
     TextGenerationResult,
     TokenParam,
+    is_valid_json,
     resolve_schema,
     structured_fallback_reason,
     warn_if_truncated,
 )
+from lib.text_utils import strip_json_code_fences
 
 logger = logging.getLogger(__name__)
 
@@ -120,27 +124,40 @@ class OpenAITextBackend:
         output_tokens = usage.completion_tokens if usage else None
         text = choice.message.content or ""
 
+        prompted_json_schema = request.response_schema and _uses_prompted_json_schema(
+            self._provider_name, self._model
+        )
+        if prompted_json_schema:
+            text = _normalize_prompted_json_text(text, request.response_schema)
+            if not is_valid_json(text):
+                raise ValueError(f"{self._provider_name}/{self._model} returned non-JSON content")
+
         if request.response_schema:
             fallback_reason = structured_fallback_reason(text, request.response_schema)
             if fallback_reason:
-                logger.warning(
-                    "原生 response_format %s，降级到带校验的 Instructor 路径",
-                    fallback_reason,
-                )
-                result = await _instructor_fallback(
-                    self._client,
-                    self._model,
-                    request,
-                    messages,
-                    provider=self._provider_name,
-                    token_param=self._max_tokens_param,
-                )
-                # 这次原生 200 调用已被代理计费，把它的 token 并入降级结果，
-                # 否则 UsageTracker 会系统性漏记这部分真实消耗。
-                if usage:
-                    result.input_tokens = (result.input_tokens or 0) + (usage.prompt_tokens or 0)
-                    result.output_tokens = (result.output_tokens or 0) + (usage.completion_tokens or 0)
-                return result
+                if prompted_json_schema and is_valid_json(text):
+                    logger.warning(
+                        "prompt JSON %s; returning parseable JSON and skipping Instructor fallback",
+                        fallback_reason,
+                    )
+                else:
+                    logger.warning(
+                        "native response_format %s; falling back to Instructor",
+                        fallback_reason,
+                    )
+                    result = await _instructor_fallback(
+                        self._client,
+                        self._model,
+                        request,
+                        messages,
+                        provider=self._provider_name,
+                        token_param=self._max_tokens_param,
+                    )
+                    # The native 200 response was billed; merge its tokens into fallback usage.
+                    if usage:
+                        result.input_tokens = (result.input_tokens or 0) + (usage.prompt_tokens or 0)
+                        result.output_tokens = (result.output_tokens or 0) + (usage.completion_tokens or 0)
+                    return result
 
         warn_if_truncated(
             getattr(choice, "finish_reason", None),
@@ -212,6 +229,73 @@ def _messages_with_json_instruction(messages: list[dict]) -> list[dict]:
 
     last["content"] = instruction.strip()
     return patched
+
+
+def _normalize_prompted_json_text(text: str, response_schema: dict | type | None) -> str:
+    """Clean prompt-only JSON output and normalize it when a Pydantic schema is available."""
+    candidate = strip_json_code_fences(text)
+    if not is_valid_json(candidate):
+        extracted = _extract_first_json_value(candidate)
+        if extracted:
+            candidate = extracted
+
+    if not is_valid_json(candidate):
+        return candidate
+
+    if isinstance(response_schema, type) and issubclass(response_schema, BaseModel):
+        try:
+            validated = response_schema.model_validate_json(candidate, strict=False)
+            return json.dumps(validated.model_dump(), ensure_ascii=False, separators=(",", ":"))
+        except ValidationError:
+            data = json.loads(candidate)
+            if isinstance(data, dict):
+                for key in ("response", "result", "data", "script", "episode"):
+                    value = data.get(key)
+                    if value is None:
+                        continue
+                    try:
+                        validated = response_schema.model_validate(value, strict=False)
+                        return json.dumps(validated.model_dump(), ensure_ascii=False, separators=(",", ":"))
+                    except ValidationError:
+                        continue
+    return candidate
+
+
+def _extract_first_json_value(text: str) -> str | None:
+    """Extract the first balanced JSON object or array from text."""
+    start = next((idx for idx, char in enumerate(text) if char in "{["), None)
+    if start is None:
+        return None
+
+    opening = text[start]
+    closing = "}" if opening == "{" else "]"
+    stack = [closing]
+    in_string = False
+    escaped = False
+
+    for idx in range(start + 1, len(text)):
+        char = text[idx]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append("}" if char == "{" else "]")
+        elif char in "}]":
+            if not stack or char != stack[-1]:
+                return None
+            stack.pop()
+            if not stack:
+                return text[start : idx + 1].strip()
+
+    return None
 
 
 _SCHEMA_ERROR_KEYWORDS = (
