@@ -243,22 +243,168 @@ def _normalize_prompted_json_text(text: str, response_schema: dict | type | None
         return candidate
 
     if isinstance(response_schema, type) and issubclass(response_schema, BaseModel):
+        data = json.loads(candidate)
+        data = _normalize_script_like_payload(data)
+        candidate = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
         try:
             validated = response_schema.model_validate_json(candidate, strict=False)
             return json.dumps(validated.model_dump(), ensure_ascii=False, separators=(",", ":"))
         except ValidationError:
-            data = json.loads(candidate)
             if isinstance(data, dict):
                 for key in ("response", "result", "data", "script", "episode"):
                     value = data.get(key)
                     if value is None:
                         continue
+                    value = _normalize_script_like_payload(value)
                     try:
                         validated = response_schema.model_validate(value, strict=False)
                         return json.dumps(validated.model_dump(), ensure_ascii=False, separators=(",", ":"))
                     except ValidationError:
                         continue
     return candidate
+
+
+_SHOT_TYPE_ALIASES = {
+    "extreme close up": "Extreme Close-up",
+    "extreme close-up": "Extreme Close-up",
+    "特写": "Close-up",
+    "大特写": "Extreme Close-up",
+    "近景": "Close-up",
+    "中近景": "Medium Close-up",
+    "中景": "Medium Shot",
+    "中远景": "Medium Long Shot",
+    "远景": "Long Shot",
+    "大远景": "Extreme Long Shot",
+    "过肩镜头": "Over-the-shoulder",
+    "肩越し": "Over-the-shoulder",
+    "主观镜头": "Point-of-view",
+    "第一人称": "Point-of-view",
+    "pov": "Point-of-view",
+}
+
+_CAMERA_MOTION_ALIASES = {
+    "fixed": "Static",
+    "none": "Static",
+    "still": "Static",
+    "静止": "Static",
+    "固定": "Static",
+    "左摇": "Pan Left",
+    "向左摇": "Pan Left",
+    "右摇": "Pan Right",
+    "向右摇": "Pan Right",
+    "上摇": "Tilt Up",
+    "向上摇": "Tilt Up",
+    "下摇": "Tilt Down",
+    "向下摇": "Tilt Down",
+    "推近": "Zoom In",
+    "拉近": "Zoom In",
+    "放大": "Zoom In",
+    "拉远": "Zoom Out",
+    "缩小": "Zoom Out",
+    "跟拍": "Tracking Shot",
+    "跟随": "Tracking Shot",
+    "跟踪镜头": "Tracking Shot",
+}
+
+
+def _normalize_script_like_payload(data):
+    """Normalize common LLM drift in ArcReel script-shaped JSON."""
+    if isinstance(data, dict):
+        normalized = {key: _normalize_script_like_payload(value) for key, value in data.items()}
+        for wrapper_key in ("response", "result", "data", "script", "episode"):
+            wrapped = normalized.get(wrapper_key)
+            if isinstance(wrapped, dict) and any(key in wrapped for key in ("segments", "scenes", "shots")):
+                normalized = {**wrapped, **{k: v for k, v in normalized.items() if k not in {wrapper_key}}}
+                break
+
+        for items_key in ("segments", "scenes", "shots"):
+            items = normalized.get(items_key)
+            if isinstance(items, list):
+                normalized[items_key] = [_normalize_script_item(item) for item in items]
+                if not normalized.get("title"):
+                    normalized["title"] = "Untitled"
+        return normalized
+    if isinstance(data, list):
+        return [_normalize_script_like_payload(item) for item in data]
+    return data
+
+
+def _normalize_script_item(item):
+    if not isinstance(item, dict):
+        return item
+    item = dict(item)
+
+    video_prompt = item.get("video_prompt")
+    if isinstance(video_prompt, dict):
+        video_prompt = dict(video_prompt)
+        if "ambiance_audio" not in video_prompt and "ambience_audio" in video_prompt:
+            video_prompt["ambiance_audio"] = video_prompt.pop("ambience_audio")
+        if "camera_motion" in video_prompt:
+            video_prompt["camera_motion"] = _normalize_enum_value(
+                video_prompt["camera_motion"],
+                _CAMERA_MOTION_ALIASES,
+                {
+                    "Static",
+                    "Pan Left",
+                    "Pan Right",
+                    "Tilt Up",
+                    "Tilt Down",
+                    "Zoom In",
+                    "Zoom Out",
+                    "Tracking Shot",
+                },
+                "Static",
+            )
+        if "dialogue" not in video_prompt and "dialogue" in item:
+            dialogue = item.pop("dialogue")
+            if isinstance(dialogue, list):
+                video_prompt["dialogue"] = dialogue
+        item["video_prompt"] = video_prompt
+    else:
+        item.pop("dialogue", None)
+
+    image_prompt = item.get("image_prompt")
+    if isinstance(image_prompt, dict):
+        composition = image_prompt.get("composition")
+        if isinstance(composition, dict) and "shot_type" in composition:
+            composition = dict(composition)
+            composition["shot_type"] = _normalize_enum_value(
+                composition["shot_type"],
+                _SHOT_TYPE_ALIASES,
+                {
+                    "Extreme Close-up",
+                    "Close-up",
+                    "Medium Close-up",
+                    "Medium Shot",
+                    "Medium Long Shot",
+                    "Long Shot",
+                    "Extreme Long Shot",
+                    "Over-the-shoulder",
+                    "Point-of-view",
+                },
+                "Medium Shot",
+            )
+            image_prompt = dict(image_prompt)
+            image_prompt["composition"] = composition
+            item["image_prompt"] = image_prompt
+
+    return item
+
+
+def _normalize_enum_value(value, aliases: dict[str, str], allowed: set[str], default: str):
+    if not isinstance(value, str):
+        return default
+    stripped = value.strip()
+    if stripped in allowed:
+        return stripped
+    key = stripped.lower().replace("_", " ").replace("-", " ")
+    if key in aliases:
+        return aliases[key]
+    compact = key.replace(" ", "")
+    for allowed_value in allowed:
+        if compact == allowed_value.lower().replace("-", "").replace(" ", ""):
+            return allowed_value
+    return aliases.get(stripped, default)
 
 
 def _extract_first_json_value(text: str) -> str | None:
