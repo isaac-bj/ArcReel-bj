@@ -83,15 +83,18 @@ class OpenAITextBackend:
             kwargs[self._max_tokens_param] = request.max_output_tokens
 
         if request.response_schema:
-            schema = resolve_schema(request.response_schema)
-            kwargs["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "response",
-                    "strict": True,
-                    "schema": schema,
-                },
-            }
+            if _uses_prompted_json_schema(self._provider_name, self._model):
+                kwargs["messages"] = _messages_with_json_instruction(messages)
+            else:
+                schema = resolve_schema(request.response_schema)
+                kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "response",
+                        "strict": True,
+                        "schema": schema,
+                    },
+                }
 
         logger.info("调用 %s 文本 SDK kwargs=%s", self.name, format_kwargs_for_log(kwargs))
         try:
@@ -178,6 +181,37 @@ def _build_messages(request: TextGenerationRequest) -> list[dict]:
         messages.append({"role": "user", "content": request.prompt})
 
     return messages
+
+
+def _uses_prompted_json_schema(provider: str, model: str) -> bool:
+    """Return True for OpenAI-compatible providers that reject json_schema response_format."""
+    target = f"{provider} {model}".lower()
+    return "minimax" in target
+
+
+def _messages_with_json_instruction(messages: list[dict]) -> list[dict]:
+    """Ask the provider for raw JSON without using response_format."""
+    instruction = (
+        "\n\nReturn only one valid JSON object that matches the requested schema. "
+        "Do not include Markdown fences, explanations, or any text outside the JSON object."
+    )
+    patched = [dict(message) for message in messages]
+    if not patched:
+        return [{"role": "user", "content": instruction.strip()}]
+
+    last = patched[-1]
+    content = last.get("content")
+    if isinstance(content, str):
+        if "JSON" not in content.upper():
+            last["content"] = content + instruction
+        return patched
+
+    if isinstance(content, list):
+        last["content"] = [*content, {"type": "text", "text": instruction.strip()}]
+        return patched
+
+    last["content"] = instruction.strip()
+    return patched
 
 
 _SCHEMA_ERROR_KEYWORDS = (
