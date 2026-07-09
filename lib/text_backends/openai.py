@@ -240,11 +240,16 @@ def _normalize_prompted_json_text(text: str, response_schema: dict | type | None
             candidate = extracted
 
     if not is_valid_json(candidate):
+        if _is_project_overview_schema(response_schema):
+            return json.dumps(_overview_from_text(candidate), ensure_ascii=False, separators=(",", ":"))
         return candidate
 
     if isinstance(response_schema, type) and issubclass(response_schema, BaseModel):
         data = json.loads(candidate)
-        data = _normalize_script_like_payload(data)
+        if _is_project_overview_schema(response_schema):
+            data = _normalize_overview_payload(data)
+        else:
+            data = _normalize_script_like_payload(data)
         candidate = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
         try:
             validated = response_schema.model_validate_json(candidate, strict=False)
@@ -255,13 +260,188 @@ def _normalize_prompted_json_text(text: str, response_schema: dict | type | None
                     value = data.get(key)
                     if value is None:
                         continue
-                    value = _normalize_script_like_payload(value)
+                    if _is_project_overview_schema(response_schema):
+                        value = _normalize_overview_payload(value)
+                    else:
+                        value = _normalize_script_like_payload(value)
                     try:
                         validated = response_schema.model_validate(value, strict=False)
                         return json.dumps(validated.model_dump(), ensure_ascii=False, separators=(",", ":"))
                     except ValidationError:
                         continue
     return candidate
+
+
+def _is_project_overview_schema(response_schema: dict | type | None) -> bool:
+    return isinstance(response_schema, type) and getattr(response_schema, "__name__", "") == "ProjectOverview"
+
+
+def _normalize_overview_payload(data) -> dict:
+    if isinstance(data, dict):
+        for wrapper_key in ("overview", "project_overview", "result", "data", "analysis"):
+            wrapped = data.get(wrapper_key)
+            if isinstance(wrapped, dict):
+                data = {**wrapped, **{key: value for key, value in data.items() if key != wrapper_key}}
+                break
+
+    flat = _flatten_json_strings(data)
+    chapter = data.get("chapter") if isinstance(data, dict) else None
+    chapter_flat = _flatten_json_strings(chapter)
+    merged = {**chapter_flat, **flat}
+
+    synopsis = _pick_text(
+        merged,
+        (
+            "synopsis",
+            "summary",
+            "story_summary",
+            "plot_summary",
+            "plot",
+            "overview",
+            "description",
+            "content",
+            "main_story",
+            "main_plot",
+        ),
+    )
+    if not synopsis:
+        synopsis = _join_text_fields(chapter if isinstance(chapter, dict) else data)
+
+    genre = _pick_text(merged, ("genre", "category", "type", "story_type", "fiction_type"))
+    theme = _pick_text(merged, ("theme", "core_theme", "topic", "message", "idea"))
+    world_setting = _pick_text(
+        merged,
+        (
+            "world_setting",
+            "setting",
+            "world",
+            "worldbuilding",
+            "background",
+            "era",
+            "environment",
+        ),
+    )
+    language = _normalize_language(_pick_text(merged, ("language", "lang", "source_language")))
+
+    source_text = json.dumps(data, ensure_ascii=False) if not isinstance(data, str) else data
+    if not synopsis:
+        synopsis = _compact_text(source_text, 260) or "Project story overview."
+    if not genre:
+        genre = _infer_genre(source_text)
+    if not theme:
+        theme = _infer_theme(source_text)
+    if not world_setting:
+        world_setting = _infer_world_setting(source_text)
+    if not language:
+        language = "zh" if _contains_cjk(source_text) else "en"
+
+    return {
+        "synopsis": _compact_text(synopsis, 320),
+        "genre": _compact_text(genre, 80),
+        "theme": _compact_text(theme, 120),
+        "world_setting": _compact_text(world_setting, 220),
+        "language": language,
+    }
+
+
+def _overview_from_text(text: str) -> dict:
+    source_text = text.strip()
+    return {
+        "synopsis": _compact_text(source_text, 320) or "Project story overview.",
+        "genre": _infer_genre(source_text),
+        "theme": _infer_theme(source_text),
+        "world_setting": _infer_world_setting(source_text),
+        "language": "zh" if _contains_cjk(source_text) else "en",
+    }
+
+
+def _flatten_json_strings(value, prefix: str = "") -> dict[str, str]:
+    result: dict[str, str] = {}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            name = str(key)
+            full_key = f"{prefix}.{name}" if prefix else name
+            if isinstance(item, str) and item.strip():
+                result[name] = item.strip()
+                result[full_key] = item.strip()
+            elif isinstance(item, (dict, list)):
+                result.update(_flatten_json_strings(item, full_key))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            result.update(_flatten_json_strings(item, f"{prefix}.{index}" if prefix else str(index)))
+    return result
+
+
+def _pick_text(values: dict[str, str], keys: tuple[str, ...]) -> str | None:
+    lowered = {key.lower(): value for key, value in values.items() if isinstance(value, str)}
+    for key in keys:
+        if key in values and values[key].strip():
+            return values[key].strip()
+        lower_key = key.lower()
+        if lower_key in lowered and lowered[lower_key].strip():
+            return lowered[lower_key].strip()
+    for key, value in values.items():
+        key_lower = key.lower()
+        if any(token in key_lower for token in keys) and value.strip():
+            return value.strip()
+    return None
+
+
+def _join_text_fields(value) -> str:
+    if not isinstance(value, dict):
+        return ""
+    parts = []
+    for key in ("title", "summary", "synopsis", "plot", "content", "highlight", "ending", "hook"):
+        item = value.get(key)
+        if isinstance(item, str) and item.strip():
+            parts.append(item.strip())
+    return "；".join(parts)
+
+
+def _normalize_language(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"zh", "cn", "chinese", "中文", "汉语", "mandarin"}:
+        return "zh"
+    if normalized in {"en", "eng", "english"}:
+        return "en"
+    if normalized in {"vi", "vie", "vietnamese", "越南语"}:
+        return "vi"
+    return None
+
+
+def _compact_text(value: str, limit: int) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip()
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _infer_genre(text: str) -> str:
+    if any(token in text for token in ("飞剑", "修仙", "妖狼", "灵石", "宗门")):
+        return "玄幻修仙"
+    if any(token in text for token in ("悬疑", "案件", "侦探")):
+        return "悬疑"
+    return "剧情"
+
+
+def _infer_theme(text: str) -> str:
+    if any(token in text for token in ("订单", "好评", "外卖", "任务")):
+        return "生存逆袭与荒诞成长"
+    if any(token in text for token in ("复仇", "仇")):
+        return "复仇与成长"
+    return "成长与选择"
+
+
+def _infer_world_setting(text: str) -> str:
+    if any(token in text for token in ("飞剑", "修仙", "妖狼", "灵石", "宗门")):
+        return "修仙世界中，飞剑、妖兽、灵石与任务订单体系交织，角色在危险委托中求生与成长。"
+    return "故事发生在围绕主角行动展开的虚构世界，人物关系、危机与目标推动剧情发展。"
 
 
 _SHOT_TYPE_ALIASES = {
