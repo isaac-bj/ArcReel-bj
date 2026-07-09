@@ -248,6 +248,8 @@ def _normalize_prompted_json_text(text: str, response_schema: dict | type | None
         data = json.loads(candidate)
         if _is_project_overview_schema(response_schema):
             data = _normalize_overview_payload(data)
+        elif _is_episode_plan_schema(response_schema):
+            data = _normalize_episode_plan_payload(data, response_schema)
         else:
             data = _normalize_script_like_payload(data)
         candidate = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
@@ -262,6 +264,8 @@ def _normalize_prompted_json_text(text: str, response_schema: dict | type | None
                         continue
                     if _is_project_overview_schema(response_schema):
                         value = _normalize_overview_payload(value)
+                    elif _is_episode_plan_schema(response_schema):
+                        value = _normalize_episode_plan_payload(value, response_schema)
                     else:
                         value = _normalize_script_like_payload(value)
                     try:
@@ -274,6 +278,75 @@ def _normalize_prompted_json_text(text: str, response_schema: dict | type | None
 
 def _is_project_overview_schema(response_schema: dict | type | None) -> bool:
     return isinstance(response_schema, type) and getattr(response_schema, "__name__", "") == "ProjectOverview"
+
+
+def _is_episode_plan_schema(response_schema: dict | type | None) -> bool:
+    if not isinstance(response_schema, type):
+        return False
+    name = getattr(response_schema, "__name__", "")
+    return name.endswith("PlanDraft") or name.endswith("ReplanDraft")
+
+
+def _normalize_episode_plan_payload(data, response_schema: type | None = None):
+    if isinstance(data, dict):
+        for wrapper_key in ("plan", "result", "data", "draft", "episode_plan"):
+            wrapped = data.get(wrapper_key)
+            if isinstance(wrapped, (dict, list)):
+                return _normalize_episode_plan_payload(wrapped, response_schema)
+
+        if "episodes" in data:
+            episodes = data.get("episodes")
+            if isinstance(episodes, dict):
+                episodes = [episodes]
+            if isinstance(episodes, list):
+                normalized = {key: value for key, value in data.items() if key != "episodes"}
+                normalized["episodes"] = [_normalize_episode_plan_item(item, response_schema) for item in episodes]
+                return normalized
+
+        if _looks_like_episode_plan_item(data):
+            return {"episodes": [_normalize_episode_plan_item(data, response_schema)]}
+        return data
+
+    if isinstance(data, list):
+        if _looks_like_episode_plan_items(data):
+            return {"episodes": [_normalize_episode_plan_item(item, response_schema) for item in data]}
+        return data
+
+    return data
+
+
+def _normalize_episode_plan_item(item, response_schema: type | None = None):
+    if not isinstance(item, dict):
+        return item
+    normalized = {
+        "title": str(item.get("title") or item.get("name") or item.get("episode_title") or "Untitled").strip(),
+        "hook": str(item.get("hook") or item.get("cliffhanger") or item.get("teaser") or item.get("ending_hook") or "下一集继续").strip(),
+        "end_anchor": str(item.get("end_anchor") or item.get("anchor") or item.get("ending_anchor") or item.get("end") or "").strip(),
+    }
+    if _episode_plan_needs_story_beats(response_schema):
+        beats = item.get("story_beats") or item.get("beats") or item.get("outline")
+        if isinstance(beats, str):
+            beats = [beats]
+        if not isinstance(beats, list) or not beats:
+            beats = [normalized["title"], normalized["hook"]]
+        normalized["story_beats"] = [str(beat).strip() for beat in beats if str(beat).strip()]
+        teaser = item.get("next_episode_teaser") or item.get("next_teaser")
+        if teaser is not None:
+            normalized["next_episode_teaser"] = str(teaser).strip()
+    return normalized
+
+
+def _episode_plan_needs_story_beats(response_schema: type | None) -> bool:
+    name = getattr(response_schema, "__name__", "") if response_schema is not None else ""
+    return "Drama" in name
+
+
+def _looks_like_episode_plan_items(items) -> bool:
+    return isinstance(items, list) and any(_looks_like_episode_plan_item(item) for item in items)
+
+
+def _looks_like_episode_plan_item(item) -> bool:
+    return isinstance(item, dict) and {"title", "hook", "end_anchor"}.issubset(item.keys())
 
 
 def _normalize_overview_payload(data) -> dict:
@@ -653,6 +726,12 @@ def _extract_best_json_value(text: str) -> str | None:
 def _json_candidate_score(value) -> int:
     if _is_script_root(value):
         return 100
+    if isinstance(value, dict) and "episodes" in value and _looks_like_episode_plan_items(value.get("episodes")):
+        return 98
+    if _looks_like_episode_plan_items(value):
+        return 88
+    if _looks_like_episode_plan_item(value):
+        return 78
     if _looks_like_script_items(value):
         return 90
     if _looks_like_script_item(value):
