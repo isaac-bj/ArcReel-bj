@@ -235,7 +235,7 @@ def _normalize_prompted_json_text(text: str, response_schema: dict | type | None
     """Clean prompt-only JSON output and normalize it when a Pydantic schema is available."""
     candidate = strip_json_code_fences(text)
     if not is_valid_json(candidate):
-        extracted = _extract_first_json_value(candidate)
+        extracted = _extract_best_json_value(candidate)
         if extracted:
             candidate = extracted
 
@@ -307,26 +307,69 @@ _CAMERA_MOTION_ALIASES = {
 }
 
 
-def _normalize_script_like_payload(data):
+def _normalize_script_like_payload(data, *, root: bool = True):
     """Normalize common LLM drift in ArcReel script-shaped JSON."""
     if isinstance(data, dict):
-        normalized = {key: _normalize_script_like_payload(value) for key, value in data.items()}
-        for wrapper_key in ("response", "result", "data", "script", "episode"):
-            wrapped = normalized.get(wrapper_key)
-            if isinstance(wrapped, dict) and any(key in wrapped for key in ("segments", "scenes", "shots")):
-                normalized = {**wrapped, **{k: v for k, v in normalized.items() if k not in {wrapper_key}}}
-                break
+        normalized = {
+            key: _normalize_script_like_payload(value, root=False)
+            for key, value in data.items()
+        }
+        if root:
+            for wrapper_key in ("response", "result", "data", "script", "episode"):
+                wrapped = normalized.get(wrapper_key)
+                if _is_script_root(wrapped) or _looks_like_script_item(wrapped):
+                    merged = _normalize_script_like_payload(wrapped, root=True)
+                    if isinstance(merged, dict):
+                        normalized = {
+                            **merged,
+                            **{key: value for key, value in normalized.items() if key not in {wrapper_key}},
+                        }
+                    break
 
-        for items_key in ("segments", "scenes", "shots"):
-            items = normalized.get(items_key)
-            if isinstance(items, list):
-                normalized[items_key] = [_normalize_script_item(item) for item in items]
-                if not normalized.get("title"):
-                    normalized["title"] = "Untitled"
+            if _looks_like_script_item(normalized):
+                items_key = _items_key_for_script_item(normalized) or "segments"
+                return {"title": "Untitled", items_key: [_normalize_script_item(normalized)]}
+
+            for items_key in ("segments", "scenes", "shots"):
+                items = normalized.get(items_key)
+                if isinstance(items, list) and _looks_like_script_items(items):
+                    normalized[items_key] = [_normalize_script_item(item) for item in items]
+                    if not normalized.get("title"):
+                        normalized["title"] = "Untitled"
         return normalized
     if isinstance(data, list):
-        return [_normalize_script_like_payload(item) for item in data]
+        if root and _looks_like_script_items(data):
+            first_key = _items_key_for_script_item(next(item for item in data if isinstance(item, dict))) or "segments"
+            return {"title": "Untitled", first_key: [_normalize_script_item(item) for item in data]}
+        return [_normalize_script_like_payload(item, root=False) for item in data]
     return data
+
+
+def _is_script_root(value) -> bool:
+    return isinstance(value, dict) and any(
+        isinstance(value.get(key), list) and _looks_like_script_items(value.get(key))
+        for key in ("segments", "scenes", "shots")
+    )
+
+
+def _looks_like_script_items(items) -> bool:
+    return isinstance(items, list) and any(_looks_like_script_item(item) for item in items)
+
+
+def _looks_like_script_item(item) -> bool:
+    return isinstance(item, dict) and any(key in item for key in ("segment_id", "scene_id", "shot_id"))
+
+
+def _items_key_for_script_item(item) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    if "segment_id" in item:
+        return "segments"
+    if "scene_id" in item:
+        return "scenes"
+    if "shot_id" in item:
+        return "shots"
+    return None
 
 
 def _normalize_script_item(item):
@@ -407,12 +450,41 @@ def _normalize_enum_value(value, aliases: dict[str, str], allowed: set[str], def
     return aliases.get(stripped, default)
 
 
-def _extract_first_json_value(text: str) -> str | None:
-    """Extract the first balanced JSON object or array from text."""
-    start = next((idx for idx, char in enumerate(text) if char in "{["), None)
-    if start is None:
+def _extract_best_json_value(text: str) -> str | None:
+    """Extract the most script-like balanced JSON value from text."""
+    candidates = []
+    for idx, char in enumerate(text):
+        if char not in "{[":
+            continue
+        candidate = _extract_balanced_json_value(text, idx)
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+        except (TypeError, ValueError):
+            continue
+        candidates.append((_json_candidate_score(parsed), candidate))
+    if not candidates:
         return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
 
+
+def _json_candidate_score(value) -> int:
+    if _is_script_root(value):
+        return 100
+    if _looks_like_script_items(value):
+        return 90
+    if _looks_like_script_item(value):
+        return 80
+    if isinstance(value, dict):
+        return 10
+    if isinstance(value, list):
+        return 1
+    return 0
+
+
+def _extract_balanced_json_value(text: str, start: int) -> str | None:
     opening = text[start]
     closing = "}" if opening == "{" else "]"
     stack = [closing]

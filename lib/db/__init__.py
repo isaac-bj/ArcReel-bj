@@ -16,6 +16,26 @@ _log = logging.getLogger(__name__)
 
 
 async def init_db() -> None:
+    for attempt in range(1, 13):
+        try:
+            await _init_db_once()
+            return
+        except Exception as exc:
+            if attempt >= 12 or not _is_transient_startup_db_error(exc):
+                raise
+            import asyncio
+
+            delay = min(2 * attempt, 10)
+            _log.warning(
+                "Database connection failed during startup (%s); retrying in %ss (%s/12)",
+                exc,
+                delay,
+                attempt,
+            )
+            await asyncio.sleep(delay)
+
+
+async def _init_db_once() -> None:
     """Run Alembic migrations to initialise / upgrade the database schema.
 
     Handles the transition from create_all to Alembic: if tables already exist
@@ -64,6 +84,23 @@ async def init_db() -> None:
 
     await asyncio.get_event_loop().run_in_executor(None, _run_alembic)
     _log.info("Database schema is up to date")
+
+
+def _is_transient_startup_db_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    transient_markers = (
+        "temporary failure in name resolution",
+        "name or service not known",
+        "could not translate host name",
+        "connection refused",
+        "connection failed",
+        "server closed the connection",
+        "the database system is starting up",
+    )
+    if any(marker in text for marker in transient_markers):
+        return True
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    return bool(cause and cause is not exc and _is_transient_startup_db_error(cause))
 
 
 async def close_db() -> None:
