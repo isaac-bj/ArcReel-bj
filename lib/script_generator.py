@@ -112,6 +112,10 @@ class ScriptGenerator:
         """按 episode → project → 默认 storyboard 回退解析 generation_mode。"""
         return effective_mode(project=self.project_json, episode=self._episode_entry(episode))
 
+    def _uses_reference_video_script(self, episode: int) -> bool:
+        """Return True when this episode must use the video_units script shape."""
+        return self.content_mode != "ad" and self._effective_generation_mode(episode) == "reference_video"
+
     @staticmethod
     def _entry_outline(entry: dict) -> dict:
         """账本条目的 outline 字段归一化为 dict（缺失/形状异常返回空 dict）。"""
@@ -186,7 +190,7 @@ class ScriptGenerator:
         # 按 segment_id 合并回 step1。非 narration 走单段（step1 markdown 直喂 LLM）。
         narration_step1: list[dict] | None = None
 
-        if gen_mode == "reference_video":
+        if self._uses_reference_video_script(episode):
             step1_md = self._load_step1(episode)
             prompt = build_reference_video_prompt(
                 project_overview=self.project_json.get("overview", {}),
@@ -415,7 +419,7 @@ class ScriptGenerator:
         scenes = self.project_json.get("scenes", {})
         props = self.project_json.get("props", {})
 
-        if gen_mode == "reference_video":
+        if self._uses_reference_video_script(episode):
             return build_reference_video_prompt(
                 project_overview=self.project_json.get("overview", {}),
                 style=self.project_json.get("style", ""),
@@ -671,7 +675,7 @@ class ScriptGenerator:
         try:
             if self.content_mode == "ad":
                 validated = AdEpisodeScript.model_validate(data)
-            elif self._effective_generation_mode(episode) == "reference_video":
+            elif self._uses_reference_video_script(episode):
                 validated = ReferenceVideoScript.model_validate(data)
             elif self.content_mode == "narration":
                 validated = NarrationEpisodeScript.model_validate(data)
@@ -757,7 +761,7 @@ class ScriptGenerator:
         # 兜底改写 segment/scene/unit ID 中的 E\d+ 前缀，避免 LLM 写错集号导致文件
         # 名跨集冲突（如 storyboards/scene_E1S01.png 被 E2 重新覆盖）。
         ep = int(episode)
-        if self.content_mode != "ad" and gen_mode == "reference_video":
+        if self._uses_reference_video_script(episode):
             for u in script_data.get("video_units") or []:
                 if isinstance(u, dict) and "unit_id" in u:
                     u["unit_id"] = _rewrite_episode_prefix(u.get("unit_id"), ep)
@@ -775,7 +779,7 @@ class ScriptGenerator:
         # ad 剧本骨架唯一、不携带"视频来源"维度：不打 generation_mode 戳——按剧本级
         # generation_mode 分派的消费方（StatusCalculator / enqueue 判别等）会被该戳
         # 误导去找不存在的 video_units。
-        if self.content_mode != "ad" and gen_mode == "reference_video":
+        if self._uses_reference_video_script(episode):
             script_data["content_mode"] = self.content_mode
             script_data["generation_mode"] = "reference_video"
         else:
@@ -819,7 +823,7 @@ class ScriptGenerator:
             shots = raw_shots if isinstance(raw_shots, list) else []
             script_data["metadata"]["total_shots"] = len(shots)
             script_data["duration_seconds"] = ad_script_total_duration(shots)
-        elif gen_mode == "reference_video":
+        elif self._uses_reference_video_script(episode):
             units = script_data.get("video_units", [])
             script_data["metadata"]["total_units"] = len(units)
             script_data["duration_seconds"] = sum(int(u.get("duration_seconds", 0)) for u in units)
@@ -850,8 +854,7 @@ class ScriptGenerator:
         try:
             short_ids: list[str] = []
 
-            gen_mode = self._effective_generation_mode(episode)
-            if self.content_mode != "ad" and gen_mode == "reference_video":
+            if self._uses_reference_video_script(episode):
                 for u in script_data.get("video_units") or []:
                     if not isinstance(u, dict):
                         continue

@@ -583,7 +583,7 @@ def _normalize_script_like_payload(data, *, root: bool = True):
                 items_key = _items_key_for_script_item(normalized) or "segments"
                 return {"title": "Untitled", items_key: [_normalize_script_item(normalized)]}
 
-            for items_key in ("segments", "scenes", "shots"):
+            for items_key in ("segments", "scenes", "shots", "video_units"):
                 items = normalized.get(items_key)
                 if isinstance(items, list) and _looks_like_script_items(items):
                     normalized[items_key] = [_normalize_script_item(item) for item in items]
@@ -601,7 +601,7 @@ def _normalize_script_like_payload(data, *, root: bool = True):
 def _is_script_root(value) -> bool:
     return isinstance(value, dict) and any(
         isinstance(value.get(key), list) and _looks_like_script_items(value.get(key))
-        for key in ("segments", "scenes", "shots")
+        for key in ("segments", "scenes", "shots", "video_units")
     )
 
 
@@ -610,7 +610,7 @@ def _looks_like_script_items(items) -> bool:
 
 
 def _looks_like_script_item(item) -> bool:
-    return isinstance(item, dict) and any(key in item for key in ("segment_id", "scene_id", "shot_id"))
+    return isinstance(item, dict) and any(key in item for key in ("segment_id", "scene_id", "shot_id", "unit_id"))
 
 
 def _items_key_for_script_item(item) -> str | None:
@@ -622,6 +622,8 @@ def _items_key_for_script_item(item) -> str | None:
         return "scenes"
     if "shot_id" in item:
         return "shots"
+    if "unit_id" in item:
+        return "video_units"
     return None
 
 

@@ -11,6 +11,22 @@ from lib.pricing.strategies import PricingParams, calculate_pricing
 from lib.providers import PROVIDER_MINIMAX, PROVIDER_OPENAI
 
 
+def test_prompt_json_normalizer_wraps_reference_video_unit():
+    from lib.text_backends.openai import _normalize_script_like_payload
+
+    normalized = _normalize_script_like_payload(
+        {
+            "unit_id": "E1U01",
+            "duration_seconds": 10,
+            "shots": [{"text": "动作描述"}],
+        }
+    )
+
+    assert normalized["title"] == "Untitled"
+    assert [unit["unit_id"] for unit in normalized["video_units"]] == ["E1U01"]
+    assert "segments" not in normalized
+
+
 def _text_response(content: str = "ok", in_tok: int = 10, out_tok: int = 5) -> MagicMock:
     usage = MagicMock()
     usage.prompt_tokens = in_tok

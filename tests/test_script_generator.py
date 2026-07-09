@@ -541,6 +541,42 @@ class TestScriptGenerator:
         assert "source_text" not in props
         assert "duration_seconds" not in props
 
+    async def test_generate_reference_video_narration_passes_reference_schema(self, tmp_path):
+        from lib.script_models import ReferenceVideoScript
+
+        project_path = tmp_path / "demo"
+        _write_json(
+            project_path / "project.json",
+            {
+                "title": "Project",
+                "content_mode": "narration",
+                "generation_mode": "reference_video",
+                "overview": {},
+                "characters": {},
+                "style": "",
+                "style_description": "",
+                "_supported_durations": [10, 15],
+            },
+        )
+        _write(project_path / "drafts" / "episode_1" / "step1_reference_units.md", "- E1U01: reference unit")
+
+        fake = _FakeTextGenerator(json.dumps({"foo": "bar"}))
+        generator = ScriptGenerator(project_path, generator=fake)
+
+        async def _fixed_caps():
+            return {"supported_durations": [10, 15]}
+
+        generator._fetch_video_capabilities = _fixed_caps
+
+        with pytest.raises(ScriptStructureValidationError):
+            await generator.generate(1)
+
+        schema = fake.backend.last_request.response_schema
+        assert isinstance(schema, type) and issubclass(schema, ReferenceVideoScript)
+        props = schema.model_json_schema()["properties"]
+        assert "video_units" in props
+        assert "segments" not in props
+
     async def test_generate_sets_script_max_output_tokens(self, tmp_path):
         """drama step2 generate 应在 TextGenerationRequest 上设置 SCRIPT_MAX_OUTPUT_TOKENS。"""
         from lib.script_generator import SCRIPT_MAX_OUTPUT_TOKENS
