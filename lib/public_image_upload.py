@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-DEFAULT_PUBLIC_IMAGE_UPLOAD_URL = "http://114.67.242.123:8887/upload.php"
+DEFAULT_PUBLIC_IMAGE_UPLOAD_URL = "http://82.156.214.180:8887/video-image-upload.php"
 
 
 def configured_public_image_upload_url() -> str:

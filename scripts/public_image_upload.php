@@ -2,10 +2,10 @@
 declare(strict_types=1);
 
 // Simple public image upload endpoint for ArcReel / Manxue video references.
-// Deploy this file as: http://114.67.242.123:8887/upload.php
+// Deploy this file as: http://82.156.214.180:8887/video-image-upload.php
 
 $UPLOAD_TOKEN = ''; // Optional: set a shared secret and configure MANXUE_PUBLIC_IMAGE_UPLOAD_TOKEN in ArcReel.
-$PUBLIC_BASE_URL = 'http://114.67.242.123:8887';
+$PUBLIC_BASE_URL = 'http://82.156.214.180:8887';
 $UPLOAD_DIR = __DIR__ . '/uploads';
 $MAX_BYTES = 15 * 1024 * 1024;
 $ALLOWED_MIME = [
