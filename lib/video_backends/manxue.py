@@ -389,46 +389,79 @@ class ManxueSeedanceVideoBackend(ManxueVideoBackend):
     async def _prepare_payload(self, request: VideoGenerationRequest) -> dict[str, Any]:
         if _is_1ren_dance_model(self.model):
             return await _build_1ren_dance_payload_with_upload(self.model, request)
-        return self._build_payload(request)
+        return await _build_seedance_payload_with_upload(self.model, request)
 
     def _build_payload(self, request: VideoGenerationRequest) -> dict[str, Any]:
         if _is_1ren_dance_model(self.model):
             return _build_1ren_dance_payload(self.model, request)
-
-        metadata: dict[str, Any] = {
-            "ratio": request.aspect_ratio,
-            "resolution": _resolve_seedance_resolution(request.resolution),
-            "duration": _resolve_seedance_duration(request.duration_seconds),
-            "generate_audio": bool(request.generate_audio),
-        }
-
-        refs = _collect_reference_images(request)
-        if refs:
-            from lib.image_backends.base import image_to_base64_data_uri
-
-            metadata["images"] = [
-                {"url": image_to_base64_data_uri(path), "role": "reference_image"}
-                for path in refs[:_SEEDANCE_REFERENCE_IMAGE_LIMIT]
-            ]
-
-        if request.resolution and request.resolution.strip().lower() == "1080p":
-            metadata["resolution"] = "720p"
-            metadata["super_resolution_config"] = {
-                "resolution": "1080p",
-                "scene": "short_series",
-                "tool_version": "standard",
-                "fps": 24,
-            }
-
-        return {
-            "model": self.model,
-            "prompt": request.prompt,
-            "metadata": metadata,
-        }
+        return _build_seedance_payload(self.model, request)
 
 
 def _is_1ren_dance_model(model: str) -> bool:
     return model.startswith("1ren-dance-2")
+
+
+def _build_seedance_payload(model: str, request: VideoGenerationRequest) -> dict[str, Any]:
+    image_urls = _collect_reference_urls(
+        request,
+        limit=_SEEDANCE_REFERENCE_IMAGE_LIMIT,
+        warn_local=False,
+    )
+    return _build_seedance_payload_from_urls(model, request, image_urls)
+
+
+async def _build_seedance_payload_with_upload(model: str, request: VideoGenerationRequest) -> dict[str, Any]:
+    image_urls = _collect_reference_urls(
+        request,
+        limit=_SEEDANCE_REFERENCE_IMAGE_LIMIT,
+        warn_local=False,
+    )
+    remaining = _SEEDANCE_REFERENCE_IMAGE_LIMIT - len(image_urls)
+    if remaining > 0:
+        local_refs = _collect_reference_images(request)[:remaining]
+        if local_refs:
+            from lib.public_image_upload import upload_public_image
+
+            uploaded: list[str] = []
+            for path in local_refs:
+                uploaded.append(await upload_public_image(path))
+            logger.info("Uploaded %d local reference image(s) for Manxue Seedance", len(uploaded))
+            image_urls.extend(uploaded)
+    return _build_seedance_payload_from_urls(model, request, image_urls[:_SEEDANCE_REFERENCE_IMAGE_LIMIT])
+
+
+def _build_seedance_payload_from_urls(
+    model: str,
+    request: VideoGenerationRequest,
+    image_urls: list[str],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "ratio": request.aspect_ratio,
+        "resolution": _resolve_seedance_resolution(request.resolution),
+        "duration": _resolve_seedance_duration(request.duration_seconds),
+        "generate_audio": bool(request.generate_audio),
+    }
+
+    if image_urls:
+        metadata["images"] = [
+            {"url": url, "role": "reference_image"}
+            for url in image_urls[:_SEEDANCE_REFERENCE_IMAGE_LIMIT]
+        ]
+
+    if request.resolution and request.resolution.strip().lower() == "1080p":
+        metadata["resolution"] = "720p"
+        metadata["super_resolution_config"] = {
+            "resolution": "1080p",
+            "scene": "short_series",
+            "tool_version": "standard",
+            "fps": 24,
+        }
+
+    return {
+        "model": model,
+        "prompt": request.prompt,
+        "metadata": metadata,
+    }
 
 
 def _build_1ren_dance_payload(model: str, request: VideoGenerationRequest) -> dict[str, Any]:

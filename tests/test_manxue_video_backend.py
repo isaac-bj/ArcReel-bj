@@ -79,11 +79,6 @@ def test_build_payload_splits_first_reference_from_images(tmp_path: Path):
 
 
 def test_seedance_build_payload_uses_metadata_media_objects(tmp_path: Path):
-    first = tmp_path / "first.png"
-    second = tmp_path / "second.jpg"
-    first.write_bytes(b"first")
-    second.write_bytes(b"second")
-
     backend = ManxueSeedanceVideoBackend(api_key="sk-test", model="guanfang-seedance-2-fast")
     req = VideoGenerationRequest(
         prompt="cinematic city night",
@@ -91,8 +86,8 @@ def test_seedance_build_payload_uses_metadata_media_objects(tmp_path: Path):
         aspect_ratio="16:9",
         duration_seconds=10,
         resolution="1080p",
-        start_image=first,
-        reference_images=[second],
+        start_image="https://cdn.example.com/first.png",  # type: ignore[arg-type]
+        reference_images=["https://cdn.example.com/second.jpg"],  # type: ignore[list-item]
         generate_audio=True,
     )
 
@@ -107,8 +102,8 @@ def test_seedance_build_payload_uses_metadata_media_objects(tmp_path: Path):
             "duration": 10,
             "generate_audio": True,
             "images": [
-                {"url": "data:image/png;base64,Zmlyc3Q=", "role": "reference_image"},
-                {"url": "data:image/jpeg;base64,c2Vjb25k", "role": "reference_image"},
+                {"url": "https://cdn.example.com/first.png", "role": "reference_image"},
+                {"url": "https://cdn.example.com/second.jpg", "role": "reference_image"},
             ],
             "super_resolution_config": {
                 "resolution": "1080p",
@@ -121,6 +116,38 @@ def test_seedance_build_payload_uses_metadata_media_objects(tmp_path: Path):
     assert "images" not in payload
     assert "ratio" not in payload
     assert "duration" not in payload
+
+
+async def test_seedance_prepare_payload_uploads_local_images(tmp_path: Path):
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.jpg"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+
+    backend = ManxueSeedanceVideoBackend(api_key="sk-test", model="guanfang-seedance-2")
+    req = VideoGenerationRequest(
+        prompt="reference images",
+        output_path=tmp_path / "out.mp4",
+        aspect_ratio="9:16",
+        duration_seconds=15,
+        resolution="720p",
+        start_image=first,
+        reference_images=[second],
+        generate_audio=False,
+    )
+
+    async def fake_upload(path: Path) -> str:
+        return f"https://cdn.example.com/{path.name}"
+
+    with patch("lib.public_image_upload.upload_public_image", side_effect=fake_upload) as upload:
+        payload = await backend._prepare_payload(req)
+
+    assert upload.await_count == 2
+    assert payload["metadata"]["images"] == [
+        {"url": "https://cdn.example.com/first.png", "role": "reference_image"},
+        {"url": "https://cdn.example.com/second.jpg", "role": "reference_image"},
+    ]
+    assert payload["metadata"]["generate_audio"] is False
 
 
 def test_seedance_endpoint_omits_local_images_for_1ren_dance_models(tmp_path: Path):

@@ -57,6 +57,10 @@ from lib.custom_provider.duration_presets import (
         ("wan-2.1", [4, 5]),
         # Pika
         ("pika-2.0", [3, 5, 10]),
+        # Manxue official Seedance gateway models only accept 10/15 seconds.
+        ("guanfang-seedance-2", [10, 15]),
+        ("guanfang-seedance-2-fast", [10, 15]),
+        ("guanfang-seedance-2-mini", [10, 15]),
         # 未知模型 → fallback
         ("totally-unknown-model", DEFAULT_FALLBACK),
         ("", DEFAULT_FALLBACK),
