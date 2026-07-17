@@ -151,7 +151,10 @@ def _build_newapi_video(provider, model_id: str) -> CustomVideoBackend:
 
 
 def _build_manxue_video(provider, model_id: str) -> CustomVideoBackend:
-    delegate = ManxueVideoBackend(api_key=provider.api_key, base_url=provider.base_url, model=model_id)
+    if model_id.lower().startswith("guanfang-seedance-"):
+        delegate = ManxueSeedanceVideoBackend(api_key=provider.api_key, base_url=provider.base_url, model=model_id)
+    else:
+        delegate = ManxueVideoBackend(api_key=provider.api_key, base_url=provider.base_url, model=model_id)
     return CustomVideoBackend(provider_id=provider.provider_id, delegate=delegate, model=model_id)
 
 

@@ -72,6 +72,32 @@ class TestEndpointDispatch:
         create_custom_backend(provider=provider, model_id="kling-v2", endpoint="newapi-video")
         mock_cls.assert_called_once_with(api_key="sk-test", base_url="https://api.example.com/v1", model="kling-v2")
 
+    @patch("lib.custom_provider.endpoints.ManxueVideoBackend")
+    def test_manxue_video(self, mock_cls):
+        provider = _make_provider(base_url="https://manxueapi.com/v1")
+        result = create_custom_backend(provider=provider, model_id="1ren-dance-2-fast-1", endpoint="manxue-video")
+        assert isinstance(result, CustomVideoBackend)
+        assert result.model == "1ren-dance-2-fast-1"
+        mock_cls.assert_called_once_with(
+            api_key="sk-test", base_url="https://manxueapi.com/v1", model="1ren-dance-2-fast-1"
+        )
+
+    @patch("lib.custom_provider.endpoints.ManxueSeedanceVideoBackend")
+    @patch("lib.custom_provider.endpoints.ManxueVideoBackend")
+    def test_manxue_video_routes_guanfang_models_to_seedance_payload(self, mock_manxue, mock_seedance):
+        provider = _make_provider(base_url="https://manxueapi.com/v1")
+        result = create_custom_backend(
+            provider=provider,
+            model_id="guanfang-seedance-2-fast",
+            endpoint="manxue-video",
+        )
+        assert isinstance(result, CustomVideoBackend)
+        assert result.model == "guanfang-seedance-2-fast"
+        mock_seedance.assert_called_once_with(
+            api_key="sk-test", base_url="https://manxueapi.com/v1", model="guanfang-seedance-2-fast"
+        )
+        mock_manxue.assert_not_called()
+
     @patch("lib.custom_provider.endpoints.V2VideoGenerationsBackend")
     def test_v2_video_generations(self, mock_cls):
         provider = _make_provider(base_url="https://api.aimlapi.com")
