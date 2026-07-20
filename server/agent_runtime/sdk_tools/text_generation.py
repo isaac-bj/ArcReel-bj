@@ -37,6 +37,20 @@ _FALLBACK_SUPPORTED_DURATIONS: list[int] = [4, 6, 8]
 # 且 source_text 逐字摘录原文，输出体量接近原文级；放宽上限避免长集被截断。
 _NORMALIZE_MAX_OUTPUT_TOKENS = 32000
 
+_THINKING_TEXT_MARKERS = ("<think", "</think>")
+_THINKING_TOP_LEVEL_KEYS = {"think", "thinking", "thought", "reasoning", "reasoning_content", "analysis"}
+
+
+def _reject_thinking_trace(response_text: str, data: dict[str, Any] | None = None) -> None:
+    lowered = response_text.lower()
+    if any(marker in lowered for marker in _THINKING_TEXT_MARKERS):
+        raise ValueError("step1 normalized content contains model thinking trace; refused to persist non-structured output")
+    if data is not None:
+        bad_keys = sorted(_THINKING_TOP_LEVEL_KEYS.intersection(str(key).lower() for key in data.keys()))
+        if bad_keys:
+            joined = ", ".join(bad_keys)
+            raise ValueError(f"step1 normalized content contains top-level thinking fields ({joined}); refused to persist")
+
 
 def _parse_normalized_content(response_text: str, model: type[BaseModel]) -> dict:
     """解析并校验 step1 结构化内容响应为 dict；校验失败 fail-loud 抛 ValueError，不返回未校验内容。
@@ -55,6 +69,7 @@ def _parse_normalized_content(response_text: str, model: type[BaseModel]) -> dic
         raise ValueError(f"step1 规范化内容 JSON 解析失败: {e}")
     if not isinstance(data, dict):
         raise ValueError("step1 规范化内容结构异常：顶层应为对象 {title, scenes}")
+    _reject_thinking_trace(response_text, data)
     try:
         return model.model_validate(data).model_dump()
     except ValidationError as e:

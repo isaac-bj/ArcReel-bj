@@ -1058,6 +1058,50 @@ async def test_normalize_drama_script_rejects_empty_scenes(fake_ctx: ToolContext
     assert not (project_path / "drafts" / "episode_1" / "step1_normalized_script.json").exists()
 
 
+async def test_normalize_drama_script_rejects_thinking_trace(fake_ctx: ToolContext, monkeypatch) -> None:
+    """normalize must not persist model reasoning fields as step1 output."""
+    from server.agent_runtime.sdk_tools import text_generation as mod
+
+    project_path = fake_ctx.project_path
+    src = project_path / "source"
+    src.mkdir(parents=True)
+    (src / "chapter1.txt").write_text("Once upon a time", encoding="utf-8")
+
+    async def fake_caps(_p):
+        return 4, [4, 6, 8]
+
+    class _ThinkingGenerator:
+        async def generate(self, _request, project_name=None):
+            class _R:
+                text = json.dumps(
+                    {
+                        "title": "Episode 1",
+                        "thinking": "I should first reason about the chapter before building scenes.",
+                        "scenes": [
+                            {
+                                "scene_id": "E1S01",
+                                "duration_seconds": 4,
+                                "characters_in_scene": ["Alice"],
+                                "scene_description": "Alice stands near the door.",
+                            }
+                        ],
+                    }
+                )
+
+            return _R()
+
+    async def fake_create(task_type, project_name=None):
+        return _ThinkingGenerator()
+
+    monkeypatch.setattr(mod, "_fetch_caps_with_fallback", fake_caps)
+    monkeypatch.setattr(mod.TextGenerator, "create", fake_create)
+
+    tool_obj = normalize_drama_script_tool(fake_ctx)
+    out = await _call(tool_obj, {"episode": 1})
+    assert out.get("is_error") is True
+    assert "thinking" in out["content"][0]["text"]
+    assert not (project_path / "drafts" / "episode_1" / "step1_normalized_script.json").exists()
+
 async def test_normalize_drama_script_injects_episode_into_prompt(fake_ctx: ToolContext, monkeypatch) -> None:
     """工具必须把 episode 注入 build_normalize_prompt，避免 LLM 写错 E\\d+ 前缀（#574）。"""
     from server.agent_runtime.sdk_tools import text_generation as mod
