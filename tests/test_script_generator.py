@@ -210,6 +210,90 @@ class TestScriptGenerator:
         with pytest.raises(FileNotFoundError, match="step1_normalized_script.json"):
             generator._load_step1(1)
 
+    async def test_load_step1_drama_migrates_legacy_markdown(self, tmp_path):
+        """legacy drama step1 markdown is migrated to the JSON contract expected by stage 4."""
+        project_path = tmp_path / "demo"
+        _write_json(
+            project_path / "project.json",
+            {
+                "title": "Demo",
+                "content_mode": "drama",
+                "generation_mode": "storyboard",
+                "overview": {},
+                "characters": {},
+                "clues": {},
+            },
+        )
+        _write(
+            project_path / "drafts" / "episode_1" / "step1_normalized_script.md",
+            """# Episode 1 normalized script
+
+## Scene list
+
+## E1S01 (4s)
+
+**segment_break**: true
+**characters_in_scene**: [Alice, Bob]
+
+**scenes**: [Kitchen]
+
+**props**: [Phone]
+
+**scene_description**: Alice stands near the kitchen door while Bob checks the phone.
+**source_text**: Alice waited by the kitchen door.
+**utterances**:
+```json
+[
+  {"kind": "dialogue", "speaker": "Alice", "text": "We need to go."}
+]
+```
+""",
+        )
+
+        generator = ScriptGenerator(project_path)
+        raw = generator._load_step1(1)
+        data = json.loads(raw)
+
+        assert (project_path / "drafts" / "episode_1" / "step1_normalized_script.json").exists()
+        assert data["title"] == "Episode 1 normalized script"
+        assert data["scenes"][0]["scene_id"] == "E1S01"
+        assert data["scenes"][0]["duration_seconds"] == 4
+        assert data["scenes"][0]["characters_in_scene"] == ["Alice", "Bob"]
+        assert data["scenes"][0]["utterances"][0]["text"] == "We need to go."
+
+    async def test_load_step1_drama_migrates_legacy_markdown_table(self, tmp_path):
+        """legacy table-only drama step1 markdown is also migrated to JSON."""
+        project_path = tmp_path / "demo"
+        _write_json(
+            project_path / "project.json",
+            {
+                "title": "Demo",
+                "content_mode": "drama",
+                "generation_mode": "storyboard",
+                "overview": {},
+                "characters": {},
+                "clues": {},
+            },
+        )
+        _write(
+            project_path / "drafts" / "episode_1" / "step1_normalized_script.md",
+            """| Scene ID | Scene description | Duration | segment_break |
+|---------|---------|------|---------------|
+| E1S01 | Alice opens the kitchen door. | 8 | true |
+| E1S02 | Bob checks the phone. | 10s | false |
+""",
+        )
+
+        generator = ScriptGenerator(project_path)
+        data = json.loads(generator._load_step1(1))
+
+        assert data["scenes"][0]["scene_id"] == "E1S01"
+        assert data["scenes"][0]["duration_seconds"] == 8
+        assert data["scenes"][0]["segment_break"] is True
+        assert data["scenes"][0]["scene_description"] == "Alice opens the kitchen door."
+        assert data["scenes"][0]["utterances"] == []
+        assert data["scenes"][1]["duration_seconds"] == 10
+
     async def test_load_drama_step1_content_rejects_non_dict_top_level(self, tmp_path):
         """drama step1 顶层非对象（如 JSON 数组）→ ValueError，不静默当空剧本。"""
         project_path = tmp_path / "demo"

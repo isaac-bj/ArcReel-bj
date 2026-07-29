@@ -173,13 +173,17 @@ def generate_episode_script_tool(ctx: ToolContext):
             if step1 is not None:
                 step1_path, hint = step1
                 if not step1_path.exists():
-                    return {
-                        "content": [
-                            {"type": "text", "text": f"❌ 未找到 Step 1 文件: {step1_path}\n   请先完成 {hint}"}
-                        ],
-                        "is_error": True,
-                    }
-
+                    legacy_drama_md = step1_path.with_name("step1_normalized_script.md")
+                    if project_data.get("content_mode") == "drama" and legacy_drama_md.exists():
+                        # Migrate legacy normalize-drama-script markdown into the JSON contract before gate checks.
+                        ScriptGenerator(project_path)._load_step1(episode)
+                    else:
+                        return {
+                            "content": [
+                                {"type": "text", "text": f"❌ 未找到 Step 1 文件: {step1_path}\n   请先完成 {hint}"}
+                            ],
+                            "is_error": True,
+                        }
             if dry_run:
                 generator = ScriptGenerator(project_path)
                 prompt = await generator.build_prompt(episode)

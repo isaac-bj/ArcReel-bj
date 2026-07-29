@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from lib.config.registry import PROVIDER_REGISTRY
 from lib.config.resolver import ConfigResolver
 from lib.db import async_session_factory
+from lib.json_io import atomic_write_json
 from lib.project_manager import ProjectManager, effective_mode
 from lib.prompt_builders_ad import build_ad_prompt
 from lib.prompt_builders_reference import build_reference_video_prompt
@@ -74,6 +75,123 @@ def _rewrite_episode_prefix(rid: object, ep: int) -> object:
         logger.warning("episode prefix rewritten: %s → %s", rid, new_rid)
     return new_rid
 
+
+
+def _parse_legacy_bool(value: str) -> bool:
+    value = value.strip().lower()
+    return value in {"true", "yes", "y", "1", "是"}
+
+
+def _parse_legacy_list(value: str) -> list[str]:
+    value = value.strip()
+    if not value or value in {"[]", "[ ]"}:
+        return []
+    if value.startswith("["):
+        value = value[1:]
+    if value.endswith("]"):
+        value = value[:-1]
+    return [item.strip().strip('"\'') for item in value.split(",") if item.strip().strip('"\'')]
+
+
+def _extract_legacy_field(section: str, field: str) -> str:
+    pattern = rf"^\*\*{re.escape(field)}\*\*:\s*(.*?)(?=^\*\*[A-Za-z_]+\*\*:|^---\s*$|^##\s+E\d+S|\Z)"
+    match = re.search(pattern, section, flags=re.MULTILINE | re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def _parse_legacy_utterances(raw: str) -> list[dict]:
+    raw = raw.strip()
+    if not raw or raw == "[]":
+        return []
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", raw, flags=re.DOTALL | re.IGNORECASE)
+    text = fenced.group(1).strip() if fenced else raw
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    utterances: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind") if item.get("kind") in {"dialogue", "voiceover"} else "voiceover"
+        text_value = item.get("text")
+        if not isinstance(text_value, str) or not text_value.strip():
+            continue
+        speaker = item.get("speaker")
+        utterances.append(
+            {
+                "kind": kind,
+                "speaker": speaker if isinstance(speaker, str) and speaker else None,
+                "text": text_value.strip(),
+            }
+        )
+    return utterances
+
+
+
+def _parse_legacy_table_drama_step1_md(md_text: str, episode: int, title: str) -> dict | None:
+    scenes: list[dict] = []
+    for line in md_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|") or re.match(r"^\|\s*-+", stripped):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 4 or not re.match(r"^E\d+S\d+(?:_\d+)?$", cells[0]):
+            continue
+        duration_match = re.search(r"\d+", cells[2])
+        if not duration_match:
+            continue
+        scenes.append(
+            {
+                "scene_id": _rewrite_episode_prefix(cells[0], episode),
+                "duration_seconds": int(duration_match.group(0)),
+                "segment_break": _parse_legacy_bool(cells[3]),
+                "characters_in_scene": [],
+                "scenes": [],
+                "props": [],
+                "scene_description": cells[1],
+                "utterances": [],
+                "source_text": "",
+            }
+        )
+    if not scenes:
+        return None
+    return {"title": title, "scenes": scenes}
+
+def _parse_legacy_drama_step1_md(md_text: str, episode: int) -> dict:
+    """Best-effort migration for old drama step1 Markdown drafts."""
+    title_match = re.search(r"^#\s+(.+?)\s*$", md_text, flags=re.MULTILINE)
+    title = title_match.group(1).strip() if title_match else f"Episode {episode}"
+    sections = list(re.finditer(r"^##\s+(E\d+S\d+(?:_\d+)?)\s*\((\d+)s\)\s*$", md_text, flags=re.MULTILINE))
+    scenes: list[dict] = []
+    for idx, match in enumerate(sections):
+        start = match.end()
+        end = sections[idx + 1].start() if idx + 1 < len(sections) else len(md_text)
+        section = md_text[start:end]
+        scene_id = _rewrite_episode_prefix(match.group(1), episode)
+        scene_description = _extract_legacy_field(section, "scene_description")
+        source_text = _extract_legacy_field(section, "source_text")
+        scenes.append(
+            {
+                "scene_id": scene_id,
+                "duration_seconds": int(match.group(2)),
+                "segment_break": _parse_legacy_bool(_extract_legacy_field(section, "segment_break")),
+                "characters_in_scene": _parse_legacy_list(_extract_legacy_field(section, "characters_in_scene")),
+                "scenes": _parse_legacy_list(_extract_legacy_field(section, "scenes")),
+                "props": _parse_legacy_list(_extract_legacy_field(section, "props")),
+                "scene_description": scene_description,
+                "utterances": _parse_legacy_utterances(_extract_legacy_field(section, "utterances")),
+                "source_text": source_text,
+            }
+        )
+    if not scenes:
+        table_data = _parse_legacy_table_drama_step1_md(md_text, episode, title)
+        if table_data is not None:
+            return table_data
+        raise ValueError("legacy step1_normalized_script.md contains no parseable scene sections")
+    return {"title": title, "scenes": scenes}
 
 class ScriptGenerator:
     """
@@ -550,12 +668,18 @@ class ScriptGenerator:
             step1_path = drafts_path / "step1_normalized_script.json"
 
         if not step1_path.exists():
-            raise FileNotFoundError(
-                f"未找到 Step 1 中间文件: {step1_path}；"
-                f"content_mode={self.content_mode}, generation_mode={gen_mode} 期望该文件，"
-                "请先完成本集预处理"
-            )
-
+            legacy_md = drafts_path / "step1_normalized_script.md"
+            if self.content_mode == "drama" and gen_mode != "reference_video" and legacy_md.exists():
+                migrated = _parse_legacy_drama_step1_md(legacy_md.read_text(encoding="utf-8"), episode)
+                step1_path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(step1_path, migrated)
+                logger.warning("migrated legacy drama step1 markdown to json: %s -> %s", legacy_md, step1_path)
+            else:
+                raise FileNotFoundError(
+                    f"未找到 Step 1 中间文件: {step1_path}，"
+                    f"content_mode={self.content_mode}, generation_mode={gen_mode} 期望该文件，"
+                    "请先完成本集预处理"
+                )
         return step1_path.read_text(encoding="utf-8")
 
     def _load_narration_step1(self, episode: int, supported_durations: list[int]) -> list[dict]:
