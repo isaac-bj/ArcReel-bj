@@ -32,9 +32,11 @@ vi.mock("./timeline/TimelineCanvas", () => ({
     onGenerateEpisodeNarration,
     onSaveTitle,
     canEditTitle,
+    hasDraft,
   }: {
     episodeScript: unknown;
     scriptFile?: string;
+    hasDraft?: boolean;
     durationOptions?: number[];
     onUpdatePrompt?: (segmentId: string, field: string, value: unknown, scriptFile?: string) => void;
     onMoveShot?: (
@@ -51,6 +53,7 @@ vi.mock("./timeline/TimelineCanvas", () => ({
   }) => (
     <div data-testid="timeline-canvas">
       <div data-testid="timeline-has-script">{episodeScript ? "yes" : "no"}</div>
+      <div data-testid="timeline-has-draft">{hasDraft ? "yes" : "no"}</div>
       <div data-testid="timeline-can-edit-title">{canEditTitle ? "yes" : "no"}</div>
       <div data-testid="timeline-duration-options">{(durationOptions ?? []).join(",")}</div>
       <button onClick={() => onUpdatePrompt?.("SEG-1", "image_prompt", "new prompt", scriptFile)}>
@@ -354,6 +357,30 @@ describe("StudioCanvasRouter", () => {
     await waitFor(() => {
       expect(screen.queryByText("加载中...")).not.toBeInTheDocument();
     });
+  });
+
+  it("opens the preprocessing surface for a registered drama episode when summary status is stale", () => {
+    useProjectsStore.setState({
+      currentProjectName: "demo",
+      currentProjectData: makeProjectData({
+        content_mode: "drama",
+        episodes: [
+          {
+            episode: 1,
+            title: "EP1",
+            script_file: "scripts/episode_1.json",
+            script_status: "none",
+          },
+        ],
+      }),
+      currentScripts: {},
+    });
+
+    renderAt("/episodes/1");
+
+    expect(screen.getByTestId("timeline-canvas")).toBeInTheDocument();
+    expect(screen.getByTestId("timeline-has-script")).toHaveTextContent("no");
+    expect(screen.getByTestId("timeline-has-draft")).toHaveTextContent("yes");
   });
 
   it("runs character callbacks and reports API failures with toast", async () => {

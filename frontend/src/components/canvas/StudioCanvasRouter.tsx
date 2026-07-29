@@ -658,8 +658,17 @@ export function StudioCanvasRouter() {
           const scriptFile = episode?.script_file?.replace(/^scripts\//, "");
           const script = scriptFile ? (currentScripts[scriptFile] ?? null) : null;
           const mode = effectiveMode(currentProjectData, episode);
+          const gateApplies =
+            Boolean(episode) &&
+            currentProjectData?.content_mode !== "ad" &&
+            mode !== "reference_video";
+          // 对适用 step1→step2 gate 的已登记分集始终开放预处理面板。script_status 是项目摘要的
+          // 派生快照，Agent 直接写入 step1 后可能暂时陈旧；若在此处把它当作挂载前提，
+          // ScriptReviewGate 就没有机会调用审核接口读取真实的 no_step1 / pending_review 状态。
           const hasDraft =
-            episode?.script_status === "segmented" || episode?.script_status === "generated";
+            gateApplies ||
+            episode?.script_status === "segmented" ||
+            episode?.script_status === "generated";
           // ad 剧本骨架唯一（shots[]），两条生成路径都进镜头编辑画布：
           // reference_video 路径的派生分组画布尚未落地，先共用 Timeline 编辑器；
           // 该路径下镜头时长为 1-15 秒自由整数，不取供应商 supported_durations，
