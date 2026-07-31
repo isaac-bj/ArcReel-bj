@@ -30,6 +30,7 @@ from lib.reference_video.ad_units import (
 )
 from lib.resource_paths import resource_relative_path
 from lib.script_editor import ScriptEditError
+from lib.script_models import GeneratedAssets
 from lib.version_manager import VersionManager
 from server.auth import CurrentUser
 from server.routers._reorder import full_permutation_error
@@ -221,6 +222,12 @@ def _build_unit_dict(
     }
 
 
+def _hydrate_unit_generated_assets(unit: dict[str, Any]) -> dict[str, Any]:
+    """补齐 LLM 可省略的运行时资产字段，满足 reference-video API 的前端契约。"""
+    assets = GeneratedAssets.model_validate(unit.get("generated_assets") or {}).model_dump(mode="json")
+    return {**unit, "generated_assets": assets}
+
+
 # ============ 端点：列出 + 新建 ============
 
 
@@ -231,7 +238,7 @@ async def list_units(project_name: str, episode: int, _user: CurrentUser, _t: Tr
     # 前端用 shot_ids 对照本地剧本水合展示，索引不复制镜头内容
     if project.get("content_mode") == "ad":
         return {"units": script.get("reference_units") or []}
-    return {"units": script.get("video_units") or []}
+    return {"units": [_hydrate_unit_generated_assets(unit) for unit in (script.get("video_units") or [])]}
 
 
 @router.post("/episodes/{episode}/derive-units")

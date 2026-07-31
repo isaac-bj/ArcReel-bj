@@ -71,6 +71,36 @@ def test_list_units_empty(client: TestClient):
     assert resp.json() == {"units": []}
 
 
+def test_list_units_hydrates_missing_generated_assets(client: TestClient, tmp_path: Path):
+    """LLM 产出的未生成 unit 可省略运行时字段；列表 API 必须补齐前端所需的默认资产对象。"""
+    script_path = tmp_path / "projects" / "demo" / "scripts" / "episode_1.json"
+    script = json.loads(script_path.read_text(encoding="utf-8"))
+    script["video_units"] = [
+        {
+            "unit_id": "E1U1",
+            "shots": [{"duration": 3, "text": "空镜"}],
+            "references": [],
+            "duration_seconds": 3,
+        }
+    ]
+    script_path.write_text(json.dumps(script, ensure_ascii=False), encoding="utf-8")
+
+    resp = client.get("/api/v1/projects/demo/reference-videos/episodes/1/units")
+
+    assert resp.status_code == 200
+    assert resp.json()["units"][0]["generated_assets"] == {
+        "storyboard_image": None,
+        "storyboard_last_image": None,
+        "grid_id": None,
+        "grid_cell_index": None,
+        "video_clip": None,
+        "video_thumbnail": None,
+        "video_uri": None,
+        "narration_audio": None,
+        "status": "pending",
+    }
+
+
 def test_list_units_404_for_unknown_project(client: TestClient):
     resp = client.get("/api/v1/projects/missing/reference-videos/episodes/1/units")
     assert resp.status_code == 404
